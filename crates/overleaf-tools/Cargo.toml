@@ -1,0 +1,21 @@
+[package]
+name = "overleaf-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+overleaf-client.workspace = true
+overleaf-realtime.workspace = true
+overleaf-types.workspace = true
+
+chrono.workspace = true
+color-eyre.workspace = true
+llmy.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true

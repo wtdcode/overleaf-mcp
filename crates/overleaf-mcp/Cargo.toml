@@ -1,0 +1,21 @@
+[package]
+name = "overleaf-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "overleaf-mcp"
+path = "src/main.rs"
+
+[dependencies]
+overleaf-tools.workspace = true
+overleaf-types.workspace = true
+
+clap.workspace = true
+color-eyre.workspace = true
+dotenvy.workspace = true
+llmy.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
