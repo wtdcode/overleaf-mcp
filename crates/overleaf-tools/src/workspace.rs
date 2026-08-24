@@ -8,7 +8,6 @@ use overleaf_types::{
     CompileRequest, CompileResponse, EntityKind, OtComponent, OverleafConfig, OverleafError,
     ProjectInfo, ProjectTree, RealtimeSettings, Result,
 };
-use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
@@ -93,8 +92,10 @@ pub struct Workspace {
     pinned: Option<ProjectInfo>,
     conns: Mutex<BTreeMap<String, ProjectConnection>>,
     projects: Mutex<Vec<ProjectInfo>>,
-    /// (project id, normalized path) -> sha256 of the content last served to
-    /// the model, so overwrites can insist on a fresh read.
+    /// (project id, normalized path) -> full content as of the model's last
+    /// read (or its own last clean edit). Overwrites insist on freshness
+    /// against it, and edits diff against it to point out collaborator
+    /// changes by line range.
     reads: Mutex<BTreeMap<(String, String), String>>,
     compiles: Mutex<BTreeMap<String, CompileRecord>>,
 }
@@ -169,8 +170,35 @@ impl Workspace {
         }
     }
 
-    fn digest(content: &[u8]) -> String {
-        format!("{:x}", Sha256::digest(content))
+    /// 1-based inclusive line range of `after` that differs from `before`,
+    /// via common prefix/suffix lines. Scattered changes collapse into one
+    /// covering range; a pure deletion points at the join line. `None` when
+    /// the contents are identical.
+    fn changed_line_range(before: &str, after: &str) -> Option<(usize, usize)> {
+        if before == after {
+            return None;
+        }
+        let before: Vec<&str> = before.split('\n').collect();
+        let after: Vec<&str> = after.split('\n').collect();
+        let max_common = before.len().min(after.len());
+        let prefix = before
+            .iter()
+            .zip(after.iter())
+            .take_while(|(b, a)| b == a)
+            .count();
+        let suffix = before
+            .iter()
+            .rev()
+            .zip(after.iter().rev())
+            .take_while(|(b, a)| b == a)
+            .count()
+            .min(max_common - prefix);
+        let start = prefix + 1;
+        let end = after.len() - suffix;
+        match end >= start {
+            true => Some((start, end)),
+            false => Some((start.saturating_sub(1).max(1), start.saturating_sub(1).max(1))),
+        }
     }
 
     /// Overleaf's doc pipeline cannot store characters outside the Unicode
@@ -273,7 +301,7 @@ impl Workspace {
     async fn stamp_read(&self, project_id: &str, path: &str, content: &str) {
         self.reads.lock().await.insert(
             (project_id.to_string(), path.to_string()),
-            Self::digest(content.as_bytes()),
+            content.to_string(),
         );
     }
 
@@ -564,17 +592,22 @@ impl Workspace {
                 kind.describe()
             )));
         }
-        if self.read_stamp(&loc.project.id, &loc.path).await.is_none() {
-            return Err(OverleafError::Edit(format!(
-                "{} has not been read in this session; call read_file first",
-                loc.path
-            )));
-        }
+        let last_read = self
+            .read_stamp(&loc.project.id, &loc.path)
+            .await
+            .ok_or_else(|| {
+                OverleafError::Edit(format!(
+                    "{} has not been read in this session; call read_file first",
+                    loc.path
+                ))
+            })?;
         let mut match_count = 0usize;
         let mut first_offset = 0usize;
+        let mut pre_content = String::new();
         let outcome = loc
             .conn
             .edit_doc(&doc_id, |content| {
+                pre_content = content.to_string();
                 let offsets: Vec<usize> = content
                     .match_indices(old_string)
                     .map(|(off, _)| off)
@@ -610,8 +643,15 @@ impl Workspace {
                 }
             })
             .await?;
-        self.stamp_read(&loc.project.id, &loc.path, &outcome.content)
-            .await;
+        // The stamp advances only for a clean edit. When collaborators changed
+        // the doc since the last read, the edit still applied (old_string
+        // anchored it), but the model is told and keeps being told until it
+        // actually re-reads.
+        let drift = Self::changed_line_range(&last_read, &pre_content);
+        if drift.is_none() {
+            self.stamp_read(&loc.project.id, &loc.path, &outcome.content)
+                .await;
+        }
         let line = outcome.content[..first_offset.min(outcome.content.len())]
             .matches('\n')
             .count()
@@ -620,10 +660,23 @@ impl Workspace {
         let from = line.saturating_sub(3).max(1);
         let (snippet, _) =
             Self::render_numbered(&outcome.content, from, Some(span + 6));
-        Ok(format!(
+        let mut out = format!(
             "Replaced {match_count} occurrence(s) in {} (now version {}).\n{snippet}",
             loc.path, outcome.version
-        ))
+        );
+        if let Some((start, end)) = drift {
+            out.push_str(&format!(
+                "\nNote: other collaborators edited {} since your last read (around line{} {} of the current content). Your edit was applied, but call read_file to see their changes before editing further.\n",
+                loc.path,
+                if end > start { "s" } else { "" },
+                if end > start {
+                    format!("{start}-{end}")
+                } else {
+                    format!("{start}")
+                }
+            ));
+        }
+        Ok(out)
     }
 
     pub async fn write_file(
@@ -638,7 +691,7 @@ impl Workspace {
             Some((doc_id, EntityKind::Doc)) => {
                 let (current, _) = loc.conn.read_doc(&doc_id).await?;
                 let stamp = self.read_stamp(&loc.project.id, &loc.path).await;
-                if stamp.as_deref() != Some(Self::digest(current.as_bytes()).as_str()) {
+                if stamp.as_deref() != Some(current.as_str()) {
                     return Err(OverleafError::Edit(format!(
                         "{} was not read since its last change; call read_file first and merge your changes",
                         loc.path

@@ -14,7 +14,9 @@ An MCP server for [Overleaf](https://www.overleaf.com), written in Rust. Works a
 - **Project sandbox**: `--project` pins the server to one project — every tool call naming another project is denied, `list_projects` shows only the pinned one, and the MCP server instructions tell the model the project is preset (the `project` parameter can then be omitted).
 - **Transports**: stdio (default) or Streamable HTTP (`--listen`).
 
-## Build
+## Install
+
+Prebuilt binaries for Linux (x86_64, musl static), Windows (x86_64), and macOS (arm64 & x86_64) are available on the [GitHub Releases](https://github.com/wtdcode/overleaf-mcp/releases) page. Or build from source:
 
 ```bash
 cargo build --release
