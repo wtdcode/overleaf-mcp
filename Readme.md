@@ -35,6 +35,8 @@ Credentials are either account+password or a session cookie; when both are prese
 
 ## Use with Claude Code
 
+Over stdio (Claude Code spawns the server):
+
 ```bash
 claude mcp add overleaf \
   --env OVERLEAF_ENDPOINT=https://overleaf.example.com \
@@ -42,6 +44,13 @@ claude mcp add overleaf \
   --env OVERLEAF_PASSWORD=... \
   --env OVERLEAF_PROJECT="My Paper" \
   -- /path/to/overleaf-mcp
+```
+
+Or over Streamable HTTP (run the server yourself, e.g. shared by several sessions):
+
+```bash
+overleaf-mcp --listen 127.0.0.1:3000   # reads .env from the working directory
+claude mcp add --transport http overleaf http://127.0.0.1:3000
 ```
 
 ## Notes & limitations
