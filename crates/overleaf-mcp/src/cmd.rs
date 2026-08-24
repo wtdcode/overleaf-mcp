@@ -65,6 +65,10 @@ pub struct ProgramCommand {
     /// Maximum number of matches a search returns.
     #[arg(long, default_value_t = 200)]
     pub search_max_matches: usize,
+
+    /// Per-call ceiling on lines returned by read_file and read_log.
+    #[arg(long, default_value_t = 300)]
+    pub read_max_lines: usize,
 }
 
 impl ProgramCommand {
@@ -100,6 +104,7 @@ impl ProgramCommand {
                 edit_retries: self.edit_retries,
             },
             search_max_matches: self.search_max_matches,
+            read_max_lines: self.read_max_lines,
         };
         let workspace = Workspace::connect(cfg, settings).await?;
         let toolbox = workspace.toolbox();

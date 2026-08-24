@@ -5,7 +5,7 @@ pub const LIST_PROJECTS: &str = "List the Overleaf projects the account can acce
 
 pub const LIST_FILES: &str = "List all files and folders in an Overleaf project. Editable text files are marked as `doc`, binary assets as `file`. The compile root document is marked when known.";
 
-pub const READ_FILE: &str = "Read a text file (doc) from an Overleaf project, returned with line numbers in `cat -n` style. Reads a specific line range when asked: `offset` is the 1-based line to start from and `limit` the number of lines (e.g. offset 100, limit 50 returns lines 100-149); omit both for the whole file. Use stat_file first to learn how many lines a file has. You must read a file before you can edit or overwrite it.";
+pub const READ_FILE: &str = "Read a text file (doc) from an Overleaf project, returned with line numbers in `cat -n` style. `offset` is the 1-based line to start from and `limit` the number of lines (e.g. offset 100, limit 50 returns lines 100-149). Long files are returned in chunks (server-capped, 300 lines by default); a truncated result says how many lines remain and which offset continues the read. Use stat_file first to learn how many lines a file has. You must read a file before you can edit or overwrite it.";
 
 pub const EDIT_FILE: &str = "Replace an exact string in an Overleaf doc with new text, applied as a live collaborative edit (other people's concurrent edits are preserved). `old_string` must match the current content exactly and, unless `replace_all` is set, must be unique in the file. Requires a prior read_file of the same file in this session; if the content changed remotely and `old_string` no longer matches, re-read the file and retry. When the result notes that other collaborators edited the file, re-read it before further edits; if that keeps happening, people are actively working on the document — consider pausing your edits and telling the user instead of contending. Characters outside the Unicode BMP (e.g. emoji) cannot be stored by Overleaf and are rejected. After finishing a round of edits, run compile to verify the project still builds.";
 
@@ -33,6 +33,6 @@ pub const LABEL_VERSION: &str = "Attach a named label to a project history versi
 
 pub const COMPILE: &str = "Compile the Overleaf project with its configured LaTeX engine and return the compile status plus errors and warnings parsed from the log (a summary, never the full log). When the summary is not enough to diagnose a failure, page through the complete log with read_log; use download_output to save output.pdf or other artifacts.";
 
-pub const READ_LOG: &str = "Read the full output.log of the most recent compile of this session, with line numbers. Returns at most `limit` lines per call (default 200) starting at 1-based line `offset`; the header shows the total line count for paging. Run compile first.";
+pub const READ_LOG: &str = "Read the full output.log of the most recent compile of this session, with line numbers. Returns a chunk of at most `limit` lines (server-capped, 300 by default) starting at 1-based line `offset`; the header shows the total line count and a truncated result says which offset continues the read. Run compile first.";
 
 pub const DOWNLOAD_OUTPUT: &str = "Download an output file (e.g. output.pdf or output.log) produced by the most recent compile of this session to a local path. Run compile first.";

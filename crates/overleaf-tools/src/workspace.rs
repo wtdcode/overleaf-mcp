@@ -18,6 +18,8 @@ pub struct WorkspaceSettings {
     pub allow_all_projects: bool,
     pub realtime: RealtimeSettings,
     pub search_max_matches: usize,
+    /// Hard per-call ceiling on lines returned by read_file/read_log.
+    pub read_max_lines: usize,
 }
 
 /// Errors and warnings distilled from a LaTeX compile log.
@@ -363,6 +365,34 @@ impl Workspace {
         )]
     }
 
+    /// Line-numbered page of `content` honoring the server cap, with a footer
+    /// telling the model how much is left and which offset continues the read.
+    fn paged(&self, content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
+        let cap = self.settings.read_max_lines.max(1);
+        let total = content.split('\n').count();
+        let start = offset.unwrap_or(1).max(1) - 1;
+        let effective = limit.map(|l| l.min(cap)).unwrap_or(cap);
+        let (mut out, _) = Self::render_numbered(content, start + 1, Some(effective));
+        let end = (start + effective).min(total);
+        if start >= total {
+            out.push_str(&format!(
+                "(offset {} is beyond the end; the file has {total} lines)\n",
+                start + 1
+            ));
+        } else if end < total {
+            let cap_note = match limit {
+                Some(l) if l <= cap => String::new(),
+                _ => format!(" (reads are capped at {cap} lines per call)"),
+            };
+            out.push_str(&format!(
+                "... showing lines {}-{end} of {total}{cap_note}; continue with offset={}\n",
+                start + 1,
+                end + 1
+            ));
+        }
+        out
+    }
+
     fn render_numbered(content: &str, offset: usize, limit: Option<usize>) -> (String, usize) {
         let lines: Vec<&str> = content.split('\n').collect();
         let total = lines.len();
@@ -501,13 +531,12 @@ impl Workspace {
             Some((doc_id, EntityKind::Doc)) => {
                 let (content, version) = loc.conn.read_doc(&doc_id).await?;
                 self.stamp_read(&loc.project.id, &loc.path, &content).await;
-                let (body, total) =
-                    Self::render_numbered(&content, offset.unwrap_or(1), limit);
+                let total = content.split('\n').count();
                 let mut out = format!(
                     "{} (doc, version {version}, {total} lines)\n",
                     loc.path
                 );
-                out.push_str(&body);
+                out.push_str(&self.paged(&content, offset, limit));
                 Ok(out)
             }
             Some((_, EntityKind::File)) => Ok(format!(
@@ -1241,12 +1270,12 @@ impl Workspace {
                 record.log.clone().unwrap_or_default(),
             )
         };
-        let (body, total) = Self::render_numbered(&log, offset.unwrap_or(1), Some(limit.unwrap_or(200)));
+        let total = log.split('\n').count();
         let mut out = format!(
             "output.log of last compile of {} (status {status}, {total} lines total)\n",
             project.name
         );
-        out.push_str(&body);
+        out.push_str(&self.paged(&log, offset, limit));
         Ok(out)
     }
 
