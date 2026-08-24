@@ -33,8 +33,14 @@ pub struct ProgramCommand {
     pub session_cookie: Option<String>,
 
     /// Default project (name or id) used when a tool call omits `project`.
+    /// Without --allow-all-projects this is a sandbox: other projects are denied.
     #[arg(long, env = "OVERLEAF_PROJECT")]
     pub project: Option<String>,
+
+    /// Allow tool calls to name projects other than --project, which then
+    /// only serves as the default when `project` is omitted.
+    #[arg(long, env = "OVERLEAF_ALLOW_ALL_PROJECTS")]
+    pub allow_all_projects: bool,
 
     /// Serve MCP over Streamable HTTP on this address instead of stdio.
     #[arg(long)]
@@ -86,6 +92,7 @@ impl ProgramCommand {
         };
         let settings = WorkspaceSettings {
             default_project: self.project.clone(),
+            allow_all_projects: self.allow_all_projects,
             realtime: RealtimeSettings {
                 connect_timeout_secs: self.connect_timeout,
                 op_timeout_secs: self.op_timeout,
@@ -102,10 +109,16 @@ impl ProgramCommand {
                 env!("CARGO_PKG_VERSION"),
             ));
         if let Some(pinned) = workspace.pinned_project() {
-            server_info.instructions = Some(format!(
-                "This server is restricted to the Overleaf project '{}' (id {}). Every tool call operates on that project, so omit the `project` parameter; naming any other project is denied.",
-                pinned.name, pinned.id
-            ));
+            server_info.instructions = Some(match self.allow_all_projects {
+                false => format!(
+                    "This server is restricted to the Overleaf project '{}' (id {}). Every tool call operates on that project, so omit the `project` parameter; naming any other project is denied.",
+                    pinned.name, pinned.id
+                ),
+                true => format!(
+                    "The default Overleaf project is '{}' (id {}): tool calls that omit the `project` parameter operate on it. Other accessible projects may still be named explicitly.",
+                    pinned.name, pinned.id
+                ),
+            });
         }
         let server = McpToolBox::new(toolbox, server_info);
         match self.listen {

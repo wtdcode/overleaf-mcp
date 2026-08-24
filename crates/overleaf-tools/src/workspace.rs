@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 #[derive(Debug, Clone)]
 pub struct WorkspaceSettings {
     pub default_project: Option<String>,
+    /// Softens `default_project` from a sandbox into a mere default: tool
+    /// calls may still name any other accessible project.
+    pub allow_all_projects: bool,
     pub realtime: RealtimeSettings,
     pub search_max_matches: usize,
 }
@@ -217,16 +220,21 @@ impl Workspace {
     async fn resolve_project(&self, wanted: Option<&str>) -> Result<ProjectInfo> {
         let wanted = wanted.map(str::trim).filter(|w| !w.is_empty());
         if let Some(pinned) = &self.pinned {
-            return match wanted {
-                None => Ok(pinned.clone()),
+            match wanted {
+                None => return Ok(pinned.clone()),
                 Some(w) if w == pinned.id || w.eq_ignore_ascii_case(&pinned.name) => {
-                    Ok(pinned.clone())
+                    return Ok(pinned.clone());
                 }
-                Some(w) => Err(OverleafError::Denied(format!(
-                    "this server only has access to project '{}' ({}); `{w}` is not permitted — omit the `project` parameter",
-                    pinned.name, pinned.id
-                ))),
-            };
+                Some(w) if !self.settings.allow_all_projects => {
+                    return Err(OverleafError::Denied(format!(
+                        "this server only has access to project '{}' ({}); `{w}` is not permitted — omit the `project` parameter",
+                        pinned.name, pinned.id
+                    )));
+                }
+                // With allow_all_projects the pin is only a default; resolve
+                // the named project like any other below.
+                Some(_) => {}
+            }
         }
         let wanted = wanted.ok_or_else(|| {
             OverleafError::Edit(
@@ -437,7 +445,9 @@ impl Workspace {
     // --- tool entry points -------------------------------------------------
 
     pub async fn list_projects(&self) -> Result<String> {
-        if let Some(pinned) = &self.pinned {
+        if let Some(pinned) = &self.pinned
+            && !self.settings.allow_all_projects
+        {
             let access = pinned.access_level.as_deref().unwrap_or("member");
             return Ok(format!(
                 "This server is restricted to a single project:\n{}  {} ({access})\nOmit the `project` parameter in tool calls; other projects are not accessible.\n",
@@ -446,6 +456,12 @@ impl Workspace {
         }
         let fresh = self.client.list_projects().await?.projects;
         let mut out = format!("{} projects on {}:\n", fresh.len(), self.client.endpoint());
+        if let Some(pinned) = &self.pinned {
+            out.push_str(&format!(
+                "Default project when `project` is omitted: {} ({})\n",
+                pinned.name, pinned.id
+            ));
+        }
         for p in &fresh {
             let access = p.access_level.as_deref().unwrap_or("member");
             out.push_str(&format!("{}  {} ({})\n", p.id, p.name, access));

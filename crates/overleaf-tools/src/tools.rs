@@ -41,8 +41,9 @@ impl Tool for ListProjectsTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ListFilesArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
 }
 
@@ -63,8 +64,9 @@ impl Tool for ListFilesTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ReadFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// File path inside the project, e.g. `/main.tex`.
     pub path: String,
@@ -94,8 +96,9 @@ impl Tool for ReadFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct StatFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Path of the doc, file, or folder to inspect.
     pub path: String,
@@ -121,8 +124,9 @@ impl Tool for StatFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct EditFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// File path inside the project, e.g. `/main.tex`.
     pub path: String,
@@ -160,8 +164,9 @@ impl Tool for EditFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct WriteFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// File path inside the project, e.g. `/sections/intro.tex`.
     pub path: String,
@@ -189,8 +194,9 @@ impl Tool for WriteFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SearchArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Regular expression (Rust regex syntax), matched line by line.
     pub pattern: String,
@@ -225,8 +231,9 @@ impl Tool for SearchTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CreateFolderArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Folder path to create, e.g. `/figures/plots`.
     pub path: String,
@@ -252,8 +259,9 @@ impl Tool for CreateFolderTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DeleteEntityArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Path of the doc, file, or folder to delete.
     pub path: String,
@@ -279,8 +287,9 @@ impl Tool for DeleteEntityTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RenameEntityArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Path of the doc, file, or folder to rename.
     pub path: String,
@@ -308,8 +317,9 @@ impl Tool for RenameEntityTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct MoveEntityArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Path of the doc, file, or folder to move.
     pub path: String,
@@ -337,8 +347,9 @@ impl Tool for MoveEntityTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct UploadFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Local filesystem path to read.
     pub local_path: String,
@@ -366,8 +377,9 @@ impl Tool for UploadFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DownloadFileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Path of the doc or file in the project.
     pub path: String,
@@ -395,8 +407,9 @@ impl Tool for DownloadFileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetHistoryArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Page further back: the timestamp offered by a previous get_history result.
     pub before: Option<i64>,
@@ -422,8 +435,9 @@ impl Tool for GetHistoryTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct LabelVersionArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// History version to label, as shown by get_history.
     pub version: i64,
@@ -451,8 +465,9 @@ impl Tool for LabelVersionTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct CompileArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
 }
 
@@ -473,8 +488,9 @@ impl Tool for CompileTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ReadLogArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// 1-based line to start reading from (default: 1).
     pub offset: Option<usize>,
@@ -502,8 +518,9 @@ impl Tool for ReadLogTool {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DownloadOutputArgs {
-    /// Project name or id. Omit it when the server is restricted to a single
-    /// project (see server instructions); any other project is then denied.
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
     pub project: Option<String>,
     /// Output file from the last compile (default: `output.pdf`).
     pub file: Option<String>,

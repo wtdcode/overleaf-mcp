@@ -11,7 +11,7 @@ An MCP server for [Overleaf](https://www.overleaf.com), written in Rust. Works a
 - **File management**: create folders, rename, move, delete (recursive), upload local files (binary assets or text docs), download docs/files to local paths.
 - **Compile**: trigger a compile, get the status plus errors/warnings parsed from the LaTeX log; page through the full `output.log` with `read_log`; save `output.pdf` or any artifact with `download_output`.
 - **History**: `get_history` (versions, authors, changed files, structural ops, labels, paging) and `label_version` to tag a project history version.
-- **Project sandbox**: `--project` pins the server to one project — every tool call naming another project is denied, `list_projects` shows only the pinned one, and the MCP server instructions tell the model the project is preset (the `project` parameter can then be omitted).
+- **Project sandbox**: `--project` pins the server to one project — every tool call naming another project is denied, `list_projects` shows only the pinned one, and the MCP server instructions tell the model the project is preset (the `project` parameter can then be omitted). Add `--allow-all-projects` to soften the pin into a mere default: omitted `project` still means the pinned one, but other projects stay accessible.
 - **Transports**: stdio (default) or Streamable HTTP (`--listen`).
 
 ## Install
@@ -32,6 +32,7 @@ Via flags or environment variables (a `.env` in the working directory is loaded 
 | `OVERLEAF_ACCOUNT` / `OVERLEAF_PASSWORD` | Password login (Community Edition) |
 | `OVERLEAF_COOKIE` | Browser session cookies, e.g. `overleaf_session2=...` — required for www.overleaf.com, whose password login is CAPTCHA-gated. Copy it from DevTools → Cookies while logged in |
 | `OVERLEAF_PROJECT` | Optional: pin the server to this project (name or id) |
+| `OVERLEAF_ALLOW_ALL_PROJECTS` | Optional: with `OVERLEAF_PROJECT`, keep other projects accessible instead of sandboxing |
 
 Credentials are either account+password or a session cookie; when both are present the cookie wins. Timeouts, edit retries, and search caps are tunable via flags (`--help`).
 
