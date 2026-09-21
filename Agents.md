@@ -17,6 +17,7 @@
 - Avoid lifetime parameter if possible and accept cheap copies using types like `String` and `PathBuf`.
 - Always prefer BTreeMap.
 - Avoid global constants, always make parameters configuration via clap derive structs.
+- Avoid dynamic dispatch like fn(&T) -> String, only if the code or callback is really only known during runtime, like typical JIT related stuff. Always prefer static dispatch for readability and code maintaince.
 - Place llm prompts in a single rust file.
 
 ## Semantic Requirements
