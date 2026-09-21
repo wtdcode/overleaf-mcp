@@ -7,7 +7,7 @@
 
 ## General Coding Style For Rust
 
-- No 1-2 line helper.
+- No 1-2 line helper. Just make field public to avoid simple getters. Avoid any 1-2 line utils functions.
 - Think about the data flow first and design the data structs. Then construct the control flows.
 - Avoid functions that are used only once, unless the logic is complex enough. Always consider reusable components and functions.
 - Avoid free functions, always attach functions to some structs, i.e., member functions. This makes functions as transformers of the data flows. For really small necessary utils, merge them into a single file and the key point is to avoid duplication.
