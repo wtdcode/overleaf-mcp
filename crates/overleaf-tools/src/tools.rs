@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use llmy::agent::tool::ToolBox;
 use llmy::agent::{LLMYError, Tool};
+use overleaf_types::HistoryVersionRef;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -464,6 +465,104 @@ impl Tool for LabelVersionTool {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct ReadFileAtVersionArgs {
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
+    pub project: Option<String>,
+    /// File path inside the project, e.g. `/main.tex`.
+    pub path: String,
+    /// History version number (from get_history) or history label name.
+    pub version: HistoryVersionRef,
+    /// 1-based line to start reading from (default: 1).
+    pub offset: Option<usize>,
+    /// Maximum number of lines to return (server-capped).
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReadFileAtVersionTool {
+    ws: Arc<Workspace>,
+}
+
+impl Tool for ReadFileAtVersionTool {
+    type ARGUMENTS = ReadFileAtVersionArgs;
+    const NAME: &str = "read_file_at_version";
+    const DESCRIPTION: Option<&str> = Some(prompts::READ_FILE_AT_VERSION);
+
+    async fn invoke(&self, args: ReadFileAtVersionArgs) -> Result<String, LLMYError> {
+        self.ws
+            .read_file_at_version(
+                args.project.as_deref(),
+                &args.path,
+                &args.version,
+                args.offset,
+                args.limit,
+            )
+            .await
+            .into_llmy()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ListFilesAtVersionArgs {
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
+    pub project: Option<String>,
+    /// History version number (from get_history) or history label name.
+    pub version: HistoryVersionRef,
+}
+
+#[derive(Clone, Debug)]
+pub struct ListFilesAtVersionTool {
+    ws: Arc<Workspace>,
+}
+
+impl Tool for ListFilesAtVersionTool {
+    type ARGUMENTS = ListFilesAtVersionArgs;
+    const NAME: &str = "list_files_at_version";
+    const DESCRIPTION: Option<&str> = Some(prompts::LIST_FILES_AT_VERSION);
+
+    async fn invoke(&self, args: ListFilesAtVersionArgs) -> Result<String, LLMYError> {
+        self.ws
+            .list_files_at_version(args.project.as_deref(), &args.version)
+            .await
+            .into_llmy()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DownloadVersionArgs {
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
+    pub project: Option<String>,
+    /// History version number (from get_history) or history label name.
+    pub version: HistoryVersionRef,
+    /// Local filesystem path for the zip archive.
+    pub local_path: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct DownloadVersionTool {
+    ws: Arc<Workspace>,
+}
+
+impl Tool for DownloadVersionTool {
+    type ARGUMENTS = DownloadVersionArgs;
+    const NAME: &str = "download_version";
+    const DESCRIPTION: Option<&str> = Some(prompts::DOWNLOAD_VERSION);
+
+    async fn invoke(&self, args: DownloadVersionArgs) -> Result<String, LLMYError> {
+        self.ws
+            .download_version(args.project.as_deref(), &args.version, &args.local_path)
+            .await
+            .into_llmy()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct CompileArgs {
     /// Project name or id. When the server instructions name a default
     /// project this can be omitted; they also state whether other projects
@@ -569,6 +668,9 @@ impl Workspace {
         tools.add_tool(DownloadFileTool { ws: self.clone() });
         tools.add_tool(GetHistoryTool { ws: self.clone() });
         tools.add_tool(LabelVersionTool { ws: self.clone() });
+        tools.add_tool(ReadFileAtVersionTool { ws: self.clone() });
+        tools.add_tool(ListFilesAtVersionTool { ws: self.clone() });
+        tools.add_tool(DownloadVersionTool { ws: self.clone() });
         tools.add_tool(CompileTool { ws: self.clone() });
         tools.add_tool(ReadLogTool { ws: self.clone() });
         tools.add_tool(DownloadOutputTool { ws: self.clone() });

@@ -1,4 +1,75 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
+
+/// A project history version as given by a tool caller: either the version
+/// number itself, or the comment of a label attached to it.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum HistoryVersionRef {
+    Number(i64),
+    Label(String),
+}
+
+/// Response of `GET /project/:id/diff?pathname=&from=&to=`. With `from ==
+/// to` the segments are all unchanged text, i.e. the whole file content at
+/// that version; binary files yield a marker instead.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryDiffResponse {
+    pub diff: HistoryDiffBody,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum HistoryDiffBody {
+    Text(Vec<HistoryDiffSegment>),
+    Binary(HistoryBinaryMarker),
+}
+
+impl HistoryDiffBody {
+    /// Text as of the `to` version (unchanged plus inserted segments), or
+    /// `None` for binary files.
+    pub fn text_at_to(&self) -> Option<String> {
+        match self {
+            HistoryDiffBody::Text(segments) => Some(
+                segments
+                    .iter()
+                    .flat_map(|s| [s.u.as_deref(), s.i.as_deref()])
+                    .flatten()
+                    .collect(),
+            ),
+            HistoryDiffBody::Binary(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryDiffSegment {
+    #[serde(default)]
+    pub u: Option<String>,
+    #[serde(default)]
+    pub i: Option<String>,
+    #[serde(default)]
+    pub d: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryBinaryMarker {
+    pub binary: bool,
+}
+
+/// Response of `GET /project/:id/filetree/diff?from=&to=`: the files present
+/// at that version.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryFiletreeResponse {
+    pub diff: Vec<HistoryFiletreeEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryFiletreeEntry {
+    pub pathname: String,
+    #[serde(default)]
+    pub editable: bool,
+}
 
 /// Response of `GET /project/:id/updates` (summarized project history).
 #[derive(Debug, Clone, Deserialize)]

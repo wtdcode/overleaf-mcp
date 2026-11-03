@@ -5,8 +5,8 @@ use std::sync::Arc;
 use overleaf_client::OverleafClient;
 use overleaf_realtime::ProjectConnection;
 use overleaf_types::{
-    CompileRequest, CompileResponse, EntityKind, OtComponent, OverleafConfig, OverleafError,
-    ProjectInfo, ProjectTree, RealtimeSettings, Result,
+    CompileRequest, CompileResponse, EntityKind, HistoryVersionRef, OtComponent, OverleafConfig,
+    OverleafError, ProjectInfo, ProjectTree, RealtimeSettings, Result,
 };
 use tokio::sync::Mutex;
 
@@ -533,7 +533,7 @@ impl Workspace {
                 self.stamp_read(&loc.project.id, &loc.path, &content).await;
                 let total = content.split('\n').count();
                 let mut out = format!(
-                    "{} (doc, version {version}, {total} lines)\n",
+                    "{} (doc version {version}, {total} lines)\n",
                     loc.path
                 );
                 out.push_str(&self.paged(&content, offset, limit));
@@ -567,7 +567,7 @@ impl Workspace {
             Some((doc_id, EntityKind::Doc)) => {
                 let (content, version) = loc.conn.read_doc(&doc_id).await?;
                 Ok(format!(
-                    "{}: doc, version {version}, {} lines, {} bytes",
+                    "{}: doc, doc version {version}, {} lines, {} bytes",
                     loc.path,
                     content.split('\n').count(),
                     content.len()
@@ -706,7 +706,7 @@ impl Workspace {
         let (snippet, _) =
             Self::render_numbered(&outcome.content, from, Some(span + 6));
         let mut out = format!(
-            "Replaced {match_count} occurrence(s) in {} (now version {}).\n{snippet}",
+            "Replaced {match_count} occurrence(s) in {} (now doc version {}).\n{snippet}",
             loc.path, outcome.version
         );
         if let Some((start, end)) = drift {
@@ -755,7 +755,7 @@ impl Workspace {
                     .await;
                 match outcome.changed {
                     true => Ok(format!(
-                        "Overwrote {} ({} lines, version {}).",
+                        "Overwrote {} ({} lines, doc version {}).",
                         loc.path,
                         outcome.content.split('\n').count(),
                         outcome.version
@@ -808,7 +808,7 @@ impl Workspace {
                 self.stamp_read(&loc.project.id, &loc.path, &outcome.content)
                     .await;
                 Ok(format!(
-                    "Created {} ({} lines, version {}).",
+                    "Created {} ({} lines, doc version {}).",
                     loc.path,
                     outcome.content.split('\n').count(),
                     outcome.version
@@ -1163,6 +1163,199 @@ impl Workspace {
         Ok(format!(
             "Created label \"{}\" at history version {} (id {}).",
             label.comment, label.version, label.id
+        ))
+    }
+
+    /// Resolves a caller-given history version to its number, plus the label
+    /// it was found through (if any). A string that matches no label but
+    /// reads as a number (optionally `v`-prefixed) is taken as that number,
+    /// since callers sometimes quote version numbers.
+    async fn resolve_history_version(
+        &self,
+        project_id: &str,
+        wanted: &HistoryVersionRef,
+    ) -> Result<(i64, Option<String>)> {
+        let name = match wanted {
+            HistoryVersionRef::Number(n) => return Ok((*n, None)),
+            HistoryVersionRef::Label(name) => name.trim(),
+        };
+        let labels = self.client.history_labels(project_id).await?;
+        let mut hits: Vec<_> = labels.iter().filter(|l| l.comment == name).collect();
+        if hits.is_empty() {
+            hits = labels
+                .iter()
+                .filter(|l| l.comment.eq_ignore_ascii_case(name))
+                .collect();
+        }
+        match hits.as_slice() {
+            [only] => Ok((only.version, Some(only.comment.clone()))),
+            [] => match name.trim_start_matches(['v', 'V']).parse::<i64>() {
+                Ok(n) => Ok((n, None)),
+                Err(_) => {
+                    let known = labels
+                        .iter()
+                        .map(|l| format!("\"{}\" (v{})", l.comment, l.version))
+                        .collect::<Vec<_>>();
+                    Err(OverleafError::NotFound(format!(
+                        "no history label named \"{name}\"; existing labels: {}",
+                        if known.is_empty() { "none".to_string() } else { known.join(", ") }
+                    )))
+                }
+            },
+            many => Err(OverleafError::Edit(format!(
+                "label \"{name}\" is ambiguous, it is attached to versions {}; pass the version number instead",
+                many.iter()
+                    .map(|l| l.version.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    fn describe_history_version(version: i64, label: &Option<String>) -> String {
+        match label {
+            Some(label) => format!("history version {version} (label \"{label}\")"),
+            None => format!("history version {version}"),
+        }
+    }
+
+    /// The history routes answer any bad version or path with a bare 500, so
+    /// failures are diagnosed here: first whether the version exists at all,
+    /// then whether the path existed at it.
+    async fn diagnose_history_read(
+        &self,
+        project_id: &str,
+        version: i64,
+        pathname: Option<&str>,
+        original: OverleafError,
+    ) -> OverleafError {
+        match self.client.history_filetree(project_id, version).await {
+            Err(_) => {
+                if let Err(err) = self.client.flush_history(project_id).await {
+                    tracing::debug!("history flush failed: {err}");
+                }
+                let latest = self
+                    .client
+                    .history_updates(project_id, None, 1)
+                    .await
+                    .ok()
+                    .and_then(|u| u.updates.iter().map(|x| x.to_v).max());
+                OverleafError::NotFound(match latest {
+                    Some(latest) => format!(
+                        "history version {version} does not exist; valid versions are 1-{latest} (see get_history)"
+                    ),
+                    None => format!("history version {version} does not exist (see get_history)"),
+                })
+            }
+            Ok(tree)
+                if pathname.is_some_and(|p| !tree.diff.iter().any(|e| e.pathname == p)) =>
+            {
+                let pathname = pathname.unwrap_or_default();
+                let files = tree
+                    .diff
+                    .iter()
+                    .map(|e| format!("/{}", e.pathname))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                OverleafError::NotFound(format!(
+                    "/{pathname} did not exist at history version {version}; files at that version: {files}"
+                ))
+            }
+            Ok(_) => original,
+        }
+    }
+
+    /// Read-only snapshot of a doc at a past project history version. It never
+    /// counts as a read for edit purposes: the content is not the live doc.
+    pub async fn read_file_at_version(
+        &self,
+        project: Option<&str>,
+        path: &str,
+        version: &HistoryVersionRef,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<String> {
+        let project = self.resolve_project(project).await?;
+        let (version, label) = self.resolve_history_version(&project.id, version).await?;
+        let normalized = ProjectTree::normalize_path(path);
+        let pathname = normalized.trim_start_matches('/').to_string();
+        let response = match self
+            .client
+            .history_file(&project.id, &pathname, version)
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                return Err(self
+                    .diagnose_history_read(&project.id, version, Some(&pathname), err)
+                    .await);
+            }
+        };
+        let described = Self::describe_history_version(version, &label);
+        let Some(content) = response.diff.text_at_to() else {
+            return Ok(format!(
+                "{normalized} is a binary file at {described}; use download_version to get it."
+            ));
+        };
+        let total = content.split('\n').count();
+        let mut out = format!(
+            "{normalized} at {described} ({total} lines, read-only snapshot)\n"
+        );
+        out.push_str(&self.paged(&content, offset, limit));
+        Ok(out)
+    }
+
+    pub async fn list_files_at_version(
+        &self,
+        project: Option<&str>,
+        version: &HistoryVersionRef,
+    ) -> Result<String> {
+        let project = self.resolve_project(project).await?;
+        let (version, label) = self.resolve_history_version(&project.id, version).await?;
+        let tree = match self.client.history_filetree(&project.id, version).await {
+            Ok(tree) => tree,
+            Err(err) => {
+                return Err(self
+                    .diagnose_history_read(&project.id, version, None, err)
+                    .await);
+            }
+        };
+        let mut entries: Vec<_> = tree.diff.iter().collect();
+        entries.sort_by(|a, b| a.pathname.cmp(&b.pathname));
+        let mut out = format!(
+            "Files of {} at {}:\n",
+            project.name,
+            Self::describe_history_version(version, &label)
+        );
+        for entry in entries {
+            let kind = if entry.editable { "doc" } else { "binary file" };
+            out.push_str(&format!("/{} ({kind})\n", entry.pathname));
+        }
+        Ok(out)
+    }
+
+    pub async fn download_version(
+        &self,
+        project: Option<&str>,
+        version: &HistoryVersionRef,
+        local_path: &str,
+    ) -> Result<String> {
+        let project = self.resolve_project(project).await?;
+        let (version, label) = self.resolve_history_version(&project.id, version).await?;
+        let bytes = match self.client.history_version_zip(&project.id, version).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return Err(self
+                    .diagnose_history_read(&project.id, version, None, err)
+                    .await);
+            }
+        };
+        self.write_local(local_path, &bytes).await?;
+        Ok(format!(
+            "Saved {} of {} as a zip ({} bytes) to {local_path}.",
+            Self::describe_history_version(version, &label),
+            project.name,
+            bytes.len()
         ))
     }
 

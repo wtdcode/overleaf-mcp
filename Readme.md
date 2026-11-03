@@ -10,7 +10,7 @@ An MCP server for [Overleaf](https://www.overleaf.com), written in Rust. Works a
 - **Search**: regex search across all docs or a subtree, returning `path:line:` matches — also the intended way to get a document outline (search for `\\(section|subsection|...)`).
 - **File management**: create folders, rename, move, delete (recursive), upload local files (binary assets or text docs), download docs/files to local paths.
 - **Compile**: trigger a compile, get the status plus errors/warnings parsed from the LaTeX log; page through the full `output.log` with `read_log`; save `output.pdf` or any artifact with `download_output`.
-- **History**: `get_history` (versions, authors, changed files, structural ops, labels, paging) and `label_version` to tag a project history version.
+- **History**: `get_history` (versions, authors, changed files, structural ops, labels, paging) and `label_version` to tag a project history version. Past versions are browsable by version number or label name: `read_file_at_version` (paged, read-only snapshot), `list_files_at_version`, and `download_version` (whole project as a zip).
 - **Project sandbox**: `--project` pins the server to one project — every tool call naming another project is denied, `list_projects` shows only the pinned one, and the MCP server instructions tell the model the project is preset (the `project` parameter can then be omitted). Add `--allow-all-projects` to soften the pin into a mere default: omitted `project` still means the pinned one, but other projects stay accessible.
 - **Transports**: stdio (default) or Streamable HTTP (`--listen`).
 

@@ -27,9 +27,15 @@ pub const UPLOAD_FILE: &str = "Upload a local file into an Overleaf project at `
 
 pub const DOWNLOAD_FILE: &str = "Download a project doc or binary file to a local path.";
 
-pub const GET_HISTORY: &str = "Show the project's edit history, newest first: version ranges, when and by whom, which files were edited, structural changes (add/remove/rename), and existing labels. History versions are project-wide and are NOT the per-doc versions reported by read_file/edit_file. Pass `before` (the timestamp offered by a previous result) to page further back.";
+pub const GET_HISTORY: &str = "Show the project's edit history, newest first: version ranges, when and by whom, which files were edited, structural changes (add/remove/rename), and existing labels. History versions are project-wide and are NOT the `doc version` numbers reported by read_file/edit_file. Pass `before` (the timestamp offered by a previous result) to page further back. To see content at a past version use read_file_at_version, list_files_at_version, or download_version.";
 
-pub const LABEL_VERSION: &str = "Attach a named label to a project history version so it can be found and restored later in the Overleaf history UI. `version` must be a history version as shown by get_history, not a doc version.";
+pub const LABEL_VERSION: &str = "Attach a named label to a project history version so it can be found and restored later in the Overleaf history UI. `version` must be a history version as shown by get_history, never a `doc version` from read_file/edit_file.";
+
+pub const READ_FILE_AT_VERSION: &str = "Read a doc as it was at a past project history version: a read-only snapshot with line numbers, paged like read_file (server-capped chunks with a continuation offset). `version` is a history version number from get_history or the name of a history label (e.g. \"submitted-draft\") — never a `doc version` from read_file/edit_file. This does not count as reading the current file: to edit, read_file the live doc first.";
+
+pub const LIST_FILES_AT_VERSION: &str = "List the files (docs and binary files) that existed at a past project history version. `version` is a history version number from get_history or a history label name.";
+
+pub const DOWNLOAD_VERSION: &str = "Save the whole project as it was at a past history version, including binary files, as a zip to a local path. `version` is a history version number from get_history or a history label name.";
 
 pub const COMPILE: &str = "Compile the Overleaf project with its configured LaTeX engine and return the compile status plus errors and warnings parsed from the log (a summary, never the full log). When the summary is not enough to diagnose a failure, page through the complete log with read_log; use download_output to save output.pdf or other artifacts.";
 

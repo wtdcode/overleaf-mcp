@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use overleaf_types::{
-    CompileRequest, CompileResponse, EntityKind, EntityRefJson, HistoryLabel, OverleafConfig,
-    OverleafCredentials, OverleafError, ProjectList, Result, UpdatesResponse, UploadResponse,
+    CompileRequest, CompileResponse, EntityKind, EntityRefJson, HistoryDiffResponse,
+    HistoryFiletreeResponse, HistoryLabel, OverleafConfig, OverleafCredentials, OverleafError,
+    ProjectList, Result, UpdatesResponse, UploadResponse,
 };
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::{Method, Response};
@@ -521,6 +522,58 @@ impl OverleafClient {
             )
             .await?;
         Ok(resp.json().await?)
+    }
+
+    /// Path plus encoded query for a route, so arbitrary values such as file
+    /// paths survive as query parameters.
+    fn path_with_query(&self, path: &str, params: &[(&str, String)]) -> Result<String> {
+        let mut url = reqwest::Url::parse(&format!("{}{}", self.base, path))
+            .map_err(|e| OverleafError::Protocol(format!("bad url for {path}: {e}")))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in params {
+                pairs.append_pair(key, value);
+            }
+        }
+        Ok(format!("{}?{}", url.path(), url.query().unwrap_or("")))
+    }
+
+    /// Full content of `pathname` (no leading slash) at a project history
+    /// version: the history diff route with `from == to`.
+    pub async fn history_file(
+        &self,
+        project_id: &str,
+        pathname: &str,
+        version: i64,
+    ) -> Result<HistoryDiffResponse> {
+        let path = self.path_with_query(
+            &format!("/project/{project_id}/diff"),
+            &[
+                ("pathname", pathname.to_string()),
+                ("from", version.to_string()),
+                ("to", version.to_string()),
+            ],
+        )?;
+        Ok(self.get_authed(&path).await?.json().await?)
+    }
+
+    /// The files present at a project history version.
+    pub async fn history_filetree(
+        &self,
+        project_id: &str,
+        version: i64,
+    ) -> Result<HistoryFiletreeResponse> {
+        let path = self.path_with_query(
+            &format!("/project/{project_id}/filetree/diff"),
+            &[("from", version.to_string()), ("to", version.to_string())],
+        )?;
+        Ok(self.get_authed(&path).await?.json().await?)
+    }
+
+    /// Zip archive of the whole project at a history version.
+    pub async fn history_version_zip(&self, project_id: &str, version: i64) -> Result<Vec<u8>> {
+        let path = format!("/project/{project_id}/version/{version}/zip");
+        Ok(self.get_authed(&path).await?.bytes().await?.to_vec())
     }
 
     // --- compile ----------------------------------------------------------

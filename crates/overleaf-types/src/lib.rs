@@ -8,7 +8,11 @@ pub mod project;
 pub use compile::{CompileRequest, CompileResponse, OutputFile};
 pub use config::{OverleafConfig, OverleafCredentials, RealtimeSettings};
 pub use error::{OverleafError, Result};
-pub use history::{HistoryLabel, HistoryUpdate, HistoryUpdateMeta, HistoryUser, UpdatesResponse};
+pub use history::{
+    HistoryDiffBody, HistoryDiffResponse, HistoryFiletreeEntry, HistoryFiletreeResponse,
+    HistoryLabel, HistoryUpdate, HistoryUpdateMeta, HistoryUser, HistoryVersionRef,
+    UpdatesResponse,
+};
 pub use ot::{OtComponent, OtUpdate, AppliedOtUpdate, UpdateMeta};
 pub use project::{
     EntityKind, EntityRefJson, FolderJson, JoinProjectArgs, JoinedProject, ProjectInfo,
