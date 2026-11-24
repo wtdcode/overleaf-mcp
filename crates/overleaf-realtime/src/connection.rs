@@ -88,13 +88,14 @@ impl DocShadow {
             let start = OtComponent::byte_of_utf16(&self.content, comp.p).ok_or_else(|| {
                 OverleafError::OutOfSync(format!("delete position {} out of range", comp.p))
             })?;
-            let end = OtComponent::byte_of_utf16(
-                &self.content,
-                comp.p + OtComponent::utf16_len(text),
-            )
-            .ok_or_else(|| {
-                OverleafError::OutOfSync(format!("delete end for position {} out of range", comp.p))
-            })?;
+            let end =
+                OtComponent::byte_of_utf16(&self.content, comp.p + OtComponent::utf16_len(text))
+                    .ok_or_else(|| {
+                        OverleafError::OutOfSync(format!(
+                            "delete end for position {} out of range",
+                            comp.p
+                        ))
+                    })?;
             if self.content.get(start..end) != Some(text.as_str()) {
                 return Err(OverleafError::OutOfSync(
                     "deleted text does not match shadow content".to_string(),
@@ -242,18 +243,14 @@ impl ConnInner {
                 self.die(format!("connection rejected: {detail}")).await;
             }
             "otUpdateApplied" => {
-                let update: AppliedOtUpdate = match payload
-                    .args
-                    .first()
-                    .cloned()
-                    .map(serde_json::from_value)
-                {
-                    Some(Ok(update)) => update,
-                    _ => {
-                        tracing::warn!("unparseable otUpdateApplied event");
-                        return;
-                    }
-                };
+                let update: AppliedOtUpdate =
+                    match payload.args.first().cloned().map(serde_json::from_value) {
+                        Some(Ok(update)) => update,
+                        _ => {
+                            tracing::warn!("unparseable otUpdateApplied event");
+                            return;
+                        }
+                    };
                 self.on_update_applied(update).await;
             }
             "otUpdateError" => {
@@ -525,9 +522,9 @@ impl ProjectConnection {
                 "project tree changed in a way that could not be tracked".to_string(),
             ));
         }
-        st.tree.clone().ok_or_else(|| {
-            OverleafError::Protocol("project tree not available".to_string())
-        })
+        st.tree
+            .clone()
+            .ok_or_else(|| OverleafError::Protocol("project tree not available".to_string()))
     }
 
     // Local tree fixups mirroring the effects of our own HTTP mutations, so a
@@ -600,17 +597,18 @@ impl ProjectConnection {
                 return Ok((shadow.content.clone(), shadow.version));
             }
         }
-        let options = serde_json::to_value(JoinDocOptions { encode_ranges: true })?;
+        let options = serde_json::to_value(JoinDocOptions {
+            encode_ranges: true,
+        })?;
         let args = self
             .inner
             .emit_with_ack("joinDoc", vec![Value::String(doc_id.to_string()), options])
             .await?;
         if let Some(err) = args.first()
-            && !err.is_null() {
-                return Err(OverleafError::Protocol(format!(
-                    "joinDoc rejected: {err}"
-                )));
-            }
+            && !err.is_null()
+        {
+            return Err(OverleafError::Protocol(format!("joinDoc rejected: {err}")));
+        }
         let lines = args
             .get(1)
             .and_then(Value::as_array)
@@ -670,8 +668,7 @@ impl ProjectConnection {
         };
         let _guard = lock.lock().await;
 
-        let mut last_err =
-            OverleafError::OutOfSync("edit gave up before submitting".to_string());
+        let mut last_err = OverleafError::OutOfSync("edit gave up before submitting".to_string());
         for attempt in 0..=self.inner.settings.edit_retries {
             if attempt > 0 {
                 tracing::debug!(doc = %doc_id, "retrying edit, attempt {attempt}");
@@ -713,13 +710,14 @@ impl ProjectConnection {
             match rpc {
                 Ok(args) => {
                     if let Some(err) = args.first()
-                        && !err.is_null() {
-                            self.clear_in_flight(doc_id).await;
-                            // Validation and size rejections are permanent.
-                            return Err(OverleafError::Edit(format!(
-                                "server rejected update: {err}"
-                            )));
-                        }
+                        && !err.is_null()
+                    {
+                        self.clear_in_flight(doc_id).await;
+                        // Validation and size rejections are permanent.
+                        return Err(OverleafError::Edit(format!(
+                            "server rejected update: {err}"
+                        )));
+                    }
                 }
                 Err(err) => {
                     self.clear_in_flight(doc_id).await;

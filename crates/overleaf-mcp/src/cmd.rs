@@ -66,9 +66,13 @@ pub struct ProgramCommand {
     #[arg(long, default_value_t = 200)]
     pub search_max_matches: usize,
 
-    /// Per-call ceiling on lines returned by read_file and read_log.
+    /// Per-call ceiling on lines returned by read_file, read_log and diff_file.
     #[arg(long, default_value_t = 300)]
     pub read_max_lines: usize,
+
+    /// Unchanged lines shown around each change in diff_file output.
+    #[arg(long, default_value_t = 3)]
+    pub diff_context_lines: usize,
 }
 
 impl ProgramCommand {
@@ -105,14 +109,14 @@ impl ProgramCommand {
             },
             search_max_matches: self.search_max_matches,
             read_max_lines: self.read_max_lines,
+            diff_context_lines: self.diff_context_lines,
         };
         let workspace = Workspace::connect(cfg, settings).await?;
         let toolbox = workspace.toolbox();
-        let mut server_info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new(
-                "overleaf-mcp",
-                env!("CARGO_PKG_VERSION"),
-            ));
+        let mut server_info =
+            ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
+                Implementation::new("overleaf-mcp", env!("CARGO_PKG_VERSION")),
+            );
         if let Some(pinned) = workspace.pinned_project() {
             server_info.instructions = Some(match self.allow_all_projects {
                 false => format!(

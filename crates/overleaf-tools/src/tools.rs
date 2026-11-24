@@ -59,7 +59,10 @@ impl Tool for ListFilesTool {
     const DESCRIPTION: Option<&str> = Some(prompts::LIST_FILES);
 
     async fn invoke(&self, args: ListFilesArgs) -> Result<String, LLMYError> {
-        self.ws.list_files(args.project.as_deref()).await.into_llmy()
+        self.ws
+            .list_files(args.project.as_deref())
+            .await
+            .into_llmy()
     }
 }
 
@@ -370,7 +373,11 @@ impl Tool for UploadFileTool {
 
     async fn invoke(&self, args: UploadFileArgs) -> Result<String, LLMYError> {
         self.ws
-            .upload_file(args.project.as_deref(), &args.local_path, &args.project_path)
+            .upload_file(
+                args.project.as_deref(),
+                &args.local_path,
+                &args.project_path,
+            )
             .await
             .into_llmy()
     }
@@ -533,6 +540,49 @@ impl Tool for ListFilesAtVersionTool {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct DiffFileArgs {
+    /// Project name or id. When the server instructions name a default
+    /// project this can be omitted; they also state whether other projects
+    /// are accessible.
+    pub project: Option<String>,
+    /// Doc to diff, e.g. `/main.tex`. Omit to list which files changed.
+    pub path: Option<String>,
+    /// Older history version: number from get_history or a label name.
+    pub from_version: HistoryVersionRef,
+    /// Newer history version: number or label name (default: the latest).
+    pub to_version: Option<HistoryVersionRef>,
+    /// 1-based line of the diff output to start from (default: 1).
+    pub offset: Option<usize>,
+    /// Maximum number of diff output lines to return (server-capped).
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DiffFileTool {
+    ws: Arc<Workspace>,
+}
+
+impl Tool for DiffFileTool {
+    type ARGUMENTS = DiffFileArgs;
+    const NAME: &str = "diff_file";
+    const DESCRIPTION: Option<&str> = Some(prompts::DIFF_FILE);
+
+    async fn invoke(&self, args: DiffFileArgs) -> Result<String, LLMYError> {
+        self.ws
+            .diff_file(
+                args.project.as_deref(),
+                args.path.as_deref(),
+                &args.from_version,
+                args.to_version.as_ref(),
+                args.offset,
+                args.limit,
+            )
+            .await
+            .into_llmy()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct DownloadVersionArgs {
     /// Project name or id. When the server instructions name a default
     /// project this can be omitted; they also state whether other projects
@@ -568,6 +618,9 @@ pub struct CompileArgs {
     /// project this can be omitted; they also state whether other projects
     /// are accessible.
     pub project: Option<String>,
+    /// Doc to compile as the main file for this compile only, e.g.
+    /// `/slides/talk.tex`. Omit to compile the project's main document.
+    pub main_file: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -581,7 +634,10 @@ impl Tool for CompileTool {
     const DESCRIPTION: Option<&str> = Some(prompts::COMPILE);
 
     async fn invoke(&self, args: CompileArgs) -> Result<String, LLMYError> {
-        self.ws.compile(args.project.as_deref()).await.into_llmy()
+        self.ws
+            .compile(args.project.as_deref(), args.main_file.as_deref())
+            .await
+            .into_llmy()
     }
 }
 
@@ -670,6 +726,7 @@ impl Workspace {
         tools.add_tool(LabelVersionTool { ws: self.clone() });
         tools.add_tool(ReadFileAtVersionTool { ws: self.clone() });
         tools.add_tool(ListFilesAtVersionTool { ws: self.clone() });
+        tools.add_tool(DiffFileTool { ws: self.clone() });
         tools.add_tool(DownloadVersionTool { ws: self.clone() });
         tools.add_tool(CompileTool { ws: self.clone() });
         tools.add_tool(ReadLogTool { ws: self.clone() });

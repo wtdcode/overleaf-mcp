@@ -3,7 +3,11 @@ pub enum OverleafError {
     #[error("http request failed: {0}")]
     Http(#[from] reqwest::Error),
     #[error("unexpected status {status} for {url}: {body}")]
-    Status { status: u16, url: String, body: String },
+    Status {
+        status: u16,
+        url: String,
+        body: String,
+    },
     #[error("authentication failed: {0}")]
     Auth(String),
     #[error("not found: {0}")]
@@ -16,6 +20,10 @@ pub enum OverleafError {
     Edit(String),
     #[error("access denied: {0}")]
     Denied(String),
+    #[error("compile rejected: {0}")]
+    Compile(String),
+    #[error("invalid request: {0}")]
+    Invalid(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]

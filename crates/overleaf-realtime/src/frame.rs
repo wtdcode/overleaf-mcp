@@ -89,9 +89,9 @@ impl Frame {
                     Some((id_str, json)) => (id_str, serde_json::from_str(json)?),
                     None => (data, Vec::new()),
                 };
-                let id = id_str.parse::<u64>().map_err(|_| {
-                    OverleafError::Protocol(format!("bad ack id in frame: {raw}"))
-                })?;
+                let id = id_str
+                    .parse::<u64>()
+                    .map_err(|_| OverleafError::Protocol(format!("bad ack id in frame: {raw}")))?;
                 Ok(Frame::Ack { id, args })
             }
             "7" => Ok(Frame::ProtoError {

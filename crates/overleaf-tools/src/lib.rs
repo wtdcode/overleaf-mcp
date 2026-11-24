@@ -1,3 +1,4 @@
+mod diff;
 pub mod prompts;
 pub mod tools;
 pub mod workspace;

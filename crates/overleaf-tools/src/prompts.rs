@@ -17,7 +17,8 @@ pub const SEARCH: &str = "Search all docs of an Overleaf project with a regular 
 
 pub const CREATE_FOLDER: &str = "Create a folder (and any missing parents) in an Overleaf project.";
 
-pub const DELETE_ENTITY: &str = "Permanently delete a doc, file, or folder (recursively) from an Overleaf project.";
+pub const DELETE_ENTITY: &str =
+    "Permanently delete a doc, file, or folder (recursively) from an Overleaf project.";
 
 pub const RENAME_ENTITY: &str = "Rename a doc, file, or folder in place. `new_name` is the new leaf name, not a path; use move_entity to relocate.";
 
@@ -27,17 +28,19 @@ pub const UPLOAD_FILE: &str = "Upload a local file into an Overleaf project at `
 
 pub const DOWNLOAD_FILE: &str = "Download a project doc or binary file to a local path.";
 
-pub const GET_HISTORY: &str = "Show the project's edit history, newest first: version ranges, when and by whom, which files were edited, structural changes (add/remove/rename), and existing labels. History versions are project-wide and are NOT the `doc version` numbers reported by read_file/edit_file. Pass `before` (the timestamp offered by a previous result) to page further back. To see content at a past version use read_file_at_version, list_files_at_version, or download_version.";
+pub const GET_HISTORY: &str = "Show the project's edit history, newest first: version ranges, when and by whom, which files were edited, structural changes (add/remove/rename), and existing labels. History versions are project-wide and are NOT the `doc version` numbers reported by read_file/edit_file. Pass `before` (the timestamp offered by a previous result) to page further back. To see what text changed use diff_file; to see content at a past version use read_file_at_version, list_files_at_version, or download_version.";
 
 pub const LABEL_VERSION: &str = "Attach a named label to a project history version so it can be found and restored later in the Overleaf history UI. `version` must be a history version as shown by get_history, never a `doc version` from read_file/edit_file.";
 
 pub const READ_FILE_AT_VERSION: &str = "Read a doc as it was at a past project history version: a read-only snapshot with line numbers, paged like read_file (server-capped chunks with a continuation offset). `version` is a history version number from get_history or the name of a history label (e.g. \"submitted-draft\") — never a `doc version` from read_file/edit_file. This does not count as reading the current file: to edit, read_file the live doc first.";
 
+pub const DIFF_FILE: &str = "Show what changed between two project history versions. With `path`, a line diff of that doc: unified-style hunks where each line carries its line numbers at both versions, and each hunk names who made the change and when. Without `path`, the list of files added, edited, renamed or removed in the range. Versions are history version numbers from get_history or history label names (never a `doc version`); `to_version` defaults to the latest. Only the net change between the two versions is shown — edits made and undone inside the range do not appear, so diff consecutive ranges from get_history to follow individual steps. Long diffs are returned in chunks like read_file (continue with `offset`).";
+
 pub const LIST_FILES_AT_VERSION: &str = "List the files (docs and binary files) that existed at a past project history version. `version` is a history version number from get_history or a history label name.";
 
 pub const DOWNLOAD_VERSION: &str = "Save the whole project as it was at a past history version, including binary files, as a zip to a local path. `version` is a history version number from get_history or a history label name.";
 
-pub const COMPILE: &str = "Compile the Overleaf project with its configured LaTeX engine and return the compile status plus errors and warnings parsed from the log (a summary, never the full log). When the summary is not enough to diagnose a failure, page through the complete log with read_log; use download_output to save output.pdf or other artifacts.";
+pub const COMPILE: &str = "Compile the Overleaf project with its configured LaTeX engine and return the compile status, the main file that was compiled, and errors and warnings parsed from the log (a summary, never the full log). By default the project's main document (marked in list_files) is compiled; for projects with several main files (e.g. paper and slides), pass `main_file` to compile another doc for this compile only — the project setting is not changed. When the summary is not enough to diagnose a failure, page through the complete log with read_log; use download_output to save output.pdf or other artifacts.";
 
 pub const READ_LOG: &str = "Read the full output.log of the most recent compile of this session, with line numbers. Returns a chunk of at most `limit` lines (server-capped, 300 by default) starting at 1-based line `offset`; the header shows the total line count and a truncated result says which offset continues the read. Run compile first.";
 

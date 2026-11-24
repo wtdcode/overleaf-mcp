@@ -4,7 +4,10 @@
 /// a logged-in browser session.
 #[derive(Debug, Clone)]
 pub enum OverleafCredentials {
-    Password { account: String, password: String },
+    Password {
+        account: String,
+        password: String,
+    },
     /// Cookie header content, e.g. `overleaf_session2=...` (multiple cookies
     /// separated by `;` are accepted).
     SessionCookie(String),

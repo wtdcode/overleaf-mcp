@@ -10,7 +10,8 @@ pub enum HistoryVersionRef {
     Label(String),
 }
 
-/// Response of `GET /project/:id/diff?pathname=&from=&to=`. With `from ==
+/// Response of `GET /project/:id/diff?pathname=&from=&to=`: the file's net
+/// change between the two versions as character-level segments. With `from ==
 /// to` the segments are all unchanged text, i.e. the whole file content at
 /// that version; binary files yield a marker instead.
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +43,8 @@ impl HistoryDiffBody {
     }
 }
 
+/// Exactly one of `u` (unchanged), `i` (inserted) or `d` (deleted) is set.
+/// Changed segments carry who made them and when.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HistoryDiffSegment {
     #[serde(default)]
@@ -50,6 +53,8 @@ pub struct HistoryDiffSegment {
     pub i: Option<String>,
     #[serde(default)]
     pub d: Option<String>,
+    #[serde(default)]
+    pub meta: Option<HistoryUpdateMeta>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -57,8 +62,9 @@ pub struct HistoryBinaryMarker {
     pub binary: bool,
 }
 
-/// Response of `GET /project/:id/filetree/diff?from=&to=`: the files present
-/// at that version.
+/// Response of `GET /project/:id/filetree/diff?from=&to=`: one entry per file
+/// that existed anywhere in the range. With `from == to` that is simply the
+/// files present at the version, none carrying an operation.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HistoryFiletreeResponse {
     pub diff: Vec<HistoryFiletreeEntry>,
@@ -66,9 +72,49 @@ pub struct HistoryFiletreeResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HistoryFiletreeEntry {
+    /// Path at the `from` version, or where the file was added.
     pub pathname: String,
+    /// Path at the `to` version, for renamed files.
+    #[serde(rename = "newPathname", default)]
+    pub new_pathname: Option<String>,
+    /// `added`, `edited`, `renamed` or `removed`; absent when unchanged.
     #[serde(default)]
-    pub editable: bool,
+    pub operation: Option<String>,
+    #[serde(rename = "deletedAtV", default)]
+    pub deleted_at_v: Option<i64>,
+    /// Null or absent when the server does not know.
+    #[serde(default)]
+    pub editable: Option<bool>,
+}
+
+impl HistoryFiletreeEntry {
+    /// Whether this entry is the file known as `pathname` at either end of
+    /// the range.
+    pub fn is_path(&self, pathname: &str) -> bool {
+        self.pathname == pathname || self.new_pathname.as_deref() == Some(pathname)
+    }
+
+    /// Path at the end of the range.
+    pub fn final_path(&self) -> &str {
+        self.new_pathname.as_deref().unwrap_or(&self.pathname)
+    }
+
+    /// What happened to the file within the range, in words.
+    pub fn describe_change(&self) -> String {
+        match self.operation.as_deref() {
+            Some("added") => "added in this range".to_string(),
+            // deletedAtV is the last version that still had the file; the
+            // removal is the change applied on top of it.
+            Some("removed") => match self.deleted_at_v {
+                Some(v) => format!("removed after history version {v}"),
+                None => "removed in this range".to_string(),
+            },
+            Some("renamed") => format!("renamed from /{}", self.pathname),
+            Some("edited") => "edited".to_string(),
+            Some(other) => other.to_string(),
+            None => "unchanged".to_string(),
+        }
+    }
 }
 
 /// Response of `GET /project/:id/updates` (summarized project history).

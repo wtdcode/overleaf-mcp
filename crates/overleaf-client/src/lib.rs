@@ -58,9 +58,10 @@ impl OverleafClient {
         match &cfg.credentials {
             OverleafCredentials::SessionCookie(raw) => {
                 let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
-                let url: reqwest::Url = cfg.base().parse().map_err(|e| {
-                    OverleafError::Protocol(format!("bad endpoint url: {e}"))
-                })?;
+                let url: reqwest::Url = cfg
+                    .base()
+                    .parse()
+                    .map_err(|e| OverleafError::Protocol(format!("bad endpoint url: {e}")))?;
                 for pair in raw.split(';').map(str::trim).filter(|p| !p.is_empty()) {
                     jar.add_cookie_str(&format!("{pair}; Path=/; Secure"), &url);
                 }
@@ -99,7 +100,13 @@ impl OverleafClient {
             return Ok(resp);
         }
         let url = resp.url().to_string();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(500).collect();
+        let body: String = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(500)
+            .collect();
         Err(OverleafError::Status {
             status: status.as_u16(),
             url,
@@ -185,7 +192,9 @@ impl OverleafClient {
         let text = resp.text().await.unwrap_or_default();
         if !status.is_success() {
             let brief: String = text.chars().take(300).collect();
-            return Err(OverleafError::Auth(format!("login failed ({status}): {brief}")));
+            return Err(OverleafError::Auth(format!(
+                "login failed ({status}): {brief}"
+            )));
         }
         if is_json {
             let value: serde_json::Value = serde_json::from_str(&text)?;
@@ -224,7 +233,9 @@ impl OverleafClient {
             }
             return Self::ok_status(resp).await;
         }
-        Err(OverleafError::Auth("re-login did not restore access".to_string()))
+        Err(OverleafError::Auth(
+            "re-login did not restore access".to_string(),
+        ))
     }
 
     async fn send_mutating(
@@ -251,7 +262,9 @@ impl OverleafClient {
             }
             return Self::ok_status(resp).await;
         }
-        Err(OverleafError::Auth("re-login did not restore access".to_string()))
+        Err(OverleafError::Auth(
+            "re-login did not restore access".to_string(),
+        ))
     }
 
     pub async fn list_projects(&self) -> Result<ProjectList> {
@@ -346,7 +359,11 @@ impl OverleafClient {
             parent_folder_id: parent_folder_id.to_string(),
         })?;
         let resp = self
-            .send_mutating(Method::POST, &format!("/project/{project_id}/doc"), Some(body))
+            .send_mutating(
+                Method::POST,
+                &format!("/project/{project_id}/doc"),
+                Some(body),
+            )
             .await?;
         Ok(resp.json().await?)
     }
@@ -423,10 +440,7 @@ impl OverleafClient {
     ) -> Result<()> {
         self.send_mutating(
             Method::DELETE,
-            &format!(
-                "/project/{project_id}/{}/{entity_id}",
-                kind.route_segment()
-            ),
+            &format!("/project/{project_id}/{}/{entity_id}", kind.route_segment()),
             None,
         )
         .await?;
@@ -473,7 +487,9 @@ impl OverleafClient {
             }
             return Ok(parsed);
         }
-        Err(OverleafError::Auth("re-login did not restore access".to_string()))
+        Err(OverleafError::Auth(
+            "re-login did not restore access".to_string(),
+        ))
     }
 
     // --- history ----------------------------------------------------------
@@ -538,34 +554,38 @@ impl OverleafClient {
         Ok(format!("{}?{}", url.path(), url.query().unwrap_or("")))
     }
 
-    /// Full content of `pathname` (no leading slash) at a project history
-    /// version: the history diff route with `from == to`.
-    pub async fn history_file(
+    /// Net change of `pathname` (no leading slash) between two project history
+    /// versions (`from <= to`). With `from == to` it is the full content at
+    /// that version.
+    pub async fn history_diff(
         &self,
         project_id: &str,
         pathname: &str,
-        version: i64,
+        from: i64,
+        to: i64,
     ) -> Result<HistoryDiffResponse> {
         let path = self.path_with_query(
             &format!("/project/{project_id}/diff"),
             &[
                 ("pathname", pathname.to_string()),
-                ("from", version.to_string()),
-                ("to", version.to_string()),
+                ("from", from.to_string()),
+                ("to", to.to_string()),
             ],
         )?;
         Ok(self.get_authed(&path).await?.json().await?)
     }
 
-    /// The files present at a project history version.
+    /// How the file tree changed between two project history versions
+    /// (`from <= to`); with `from == to`, the files present at that version.
     pub async fn history_filetree(
         &self,
         project_id: &str,
-        version: i64,
+        from: i64,
+        to: i64,
     ) -> Result<HistoryFiletreeResponse> {
         let path = self.path_with_query(
             &format!("/project/{project_id}/filetree/diff"),
-            &[("from", version.to_string()), ("to", version.to_string())],
+            &[("from", from.to_string()), ("to", to.to_string())],
         )?;
         Ok(self.get_authed(&path).await?.json().await?)
     }

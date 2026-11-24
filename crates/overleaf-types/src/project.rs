@@ -201,9 +201,9 @@ impl ProjectTree {
 
     pub fn lookup(&self, path: &str) -> Option<(String, EntityKind)> {
         let wanted = Self::normalize_path(path);
-        self.nodes.iter().find_map(|(id, node)| {
-            (self.path_of(id)? == wanted).then(|| (id.clone(), node.kind))
-        })
+        self.nodes
+            .iter()
+            .find_map(|(id, node)| (self.path_of(id)? == wanted).then(|| (id.clone(), node.kind)))
     }
 
     /// Folder entity id for a normalized folder path; `/` maps to the root folder.

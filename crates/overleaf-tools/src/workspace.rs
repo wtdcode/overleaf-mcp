@@ -5,10 +5,13 @@ use std::sync::Arc;
 use overleaf_client::OverleafClient;
 use overleaf_realtime::ProjectConnection;
 use overleaf_types::{
-    CompileRequest, CompileResponse, EntityKind, HistoryVersionRef, OtComponent, OverleafConfig,
-    OverleafError, ProjectInfo, ProjectTree, RealtimeSettings, Result,
+    CompileRequest, CompileResponse, EntityKind, HistoryDiffBody, HistoryVersionRef, MainFileCheck,
+    MainFileOverride, OtComponent, OverleafConfig, OverleafError, ProjectInfo, ProjectTree,
+    RealtimeSettings, Result,
 };
 use tokio::sync::Mutex;
+
+use crate::diff::VersionDiff;
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceSettings {
@@ -18,14 +21,20 @@ pub struct WorkspaceSettings {
     pub allow_all_projects: bool,
     pub realtime: RealtimeSettings,
     pub search_max_matches: usize,
-    /// Hard per-call ceiling on lines returned by read_file/read_log.
+    /// Hard per-call ceiling on lines returned by read_file/read_log/diff_file.
     pub read_max_lines: usize,
+    /// Unchanged lines shown around each change in diff_file hunks.
+    pub diff_context_lines: usize,
 }
 
-/// Errors and warnings distilled from a LaTeX compile log.
+/// Errors and warnings distilled from a LaTeX compile log, plus the main file
+/// TeX was actually run on.
 struct LogSummary {
     errors: Vec<String>,
     warnings: Vec<String>,
+    /// From the `**<file>` line TeX logs for its command-line input; the
+    /// ground truth for which main file a compile used.
+    root: Option<String>,
 }
 
 impl LogSummary {
@@ -33,6 +42,11 @@ impl LogSummary {
         let lines: Vec<&str> = log.lines().collect();
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        let root = lines
+            .iter()
+            .find_map(|line| line.strip_prefix("**"))
+            .map(|r| r.trim().trim_matches('"').to_string())
+            .filter(|r| !r.is_empty());
         let mut idx = 0;
         while idx < lines.len() {
             let line = lines[idx];
@@ -55,7 +69,11 @@ impl LogSummary {
             }
             idx += 1;
         }
-        LogSummary { errors, warnings }
+        LogSummary {
+            errors,
+            warnings,
+            root,
+        }
     }
 
     fn render(&self, out: &mut String) {
@@ -134,11 +152,7 @@ impl Workspace {
                         "pinned project `{wanted}` was not found on the server"
                     ))
                 })?;
-                tracing::info!(
-                    "restricted to project '{}' ({})",
-                    hit.name,
-                    hit.id
-                );
+                tracing::info!("restricted to project '{}' ({})", hit.name, hit.id);
                 Some(hit)
             }
             _ => None,
@@ -202,7 +216,10 @@ impl Workspace {
         let end = after.len() - suffix;
         match end >= start {
             true => Some((start, end)),
-            false => Some((start.saturating_sub(1).max(1), start.saturating_sub(1).max(1))),
+            false => Some((
+                start.saturating_sub(1).max(1),
+                start.saturating_sub(1).max(1),
+            )),
         }
     }
 
@@ -325,9 +342,10 @@ impl Workspace {
 
     async fn drop_stamps_under(&self, project_id: &str, path: &str) {
         let prefix = format!("{path}/");
-        self.reads.lock().await.retain(|(pid, p), _| {
-            pid != project_id || (p != path && !p.starts_with(&prefix))
-        });
+        self.reads
+            .lock()
+            .await
+            .retain(|(pid, p), _| pid != project_id || (p != path && !p.starts_with(&prefix)));
     }
 
     /// Byte-level common prefix/suffix trim producing at most one replacement,
@@ -365,14 +383,29 @@ impl Workspace {
         )]
     }
 
-    /// Line-numbered page of `content` honoring the server cap, with a footer
-    /// telling the model how much is left and which offset continues the read.
-    fn paged(&self, content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
+    /// Page of `content` honoring the server cap, with a footer telling the
+    /// model how much is left and which offset continues the read. Lines are
+    /// prefixed with their number unless the content numbers itself.
+    fn paged(
+        &self,
+        content: &str,
+        offset: Option<usize>,
+        limit: Option<usize>,
+        numbered: bool,
+    ) -> String {
         let cap = self.settings.read_max_lines.max(1);
         let total = content.split('\n').count();
         let start = offset.unwrap_or(1).max(1) - 1;
         let effective = limit.map(|l| l.min(cap)).unwrap_or(cap);
-        let (mut out, _) = Self::render_numbered(content, start + 1, Some(effective));
+        let mut out = match numbered {
+            true => Self::render_numbered(content, start + 1, Some(effective)).0,
+            false => content
+                .split('\n')
+                .skip(start)
+                .take(effective)
+                .map(|line| format!("{line}\n"))
+                .collect(),
+        };
         let end = (start + effective).min(total);
         if start >= total {
             out.push_str(&format!(
@@ -462,9 +495,10 @@ impl Workspace {
     async fn write_local(&self, local_path: &str, bytes: &[u8]) -> Result<()> {
         let target = Path::new(local_path);
         if let Some(parent) = target.parent()
-            && !parent.as_os_str().is_empty() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
+            && !parent.as_os_str().is_empty()
+        {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         // Write-then-rename so an interrupted download never leaves a torn file.
         let tmp = target.with_extension("overleaf-mcp.tmp");
         tokio::fs::write(&tmp, bytes).await?;
@@ -532,11 +566,8 @@ impl Workspace {
                 let (content, version) = loc.conn.read_doc(&doc_id).await?;
                 self.stamp_read(&loc.project.id, &loc.path, &content).await;
                 let total = content.split('\n').count();
-                let mut out = format!(
-                    "{} (doc version {version}, {total} lines)\n",
-                    loc.path
-                );
-                out.push_str(&self.paged(&content, offset, limit));
+                let mut out = format!("{} (doc version {version}, {total} lines)\n", loc.path);
+                out.push_str(&self.paged(&content, offset, limit, true));
                 Ok(out)
             }
             Some((_, EntityKind::File)) => Ok(format!(
@@ -703,8 +734,7 @@ impl Workspace {
             + 1;
         let span = new_string.matches('\n').count() + 1;
         let from = line.saturating_sub(3).max(1);
-        let (snippet, _) =
-            Self::render_numbered(&outcome.content, from, Some(span + 6));
+        let (snippet, _) = Self::render_numbered(&outcome.content, from, Some(span + 6));
         let mut out = format!(
             "Replaced {match_count} occurrence(s) in {} (now doc version {}).\n{snippet}",
             loc.path, outcome.version
@@ -837,9 +867,7 @@ impl Workspace {
             .filter(|(doc_path, _)| match &scope {
                 None => true,
                 Some(scope) if scope == "/" => true,
-                Some(scope) => {
-                    doc_path == scope || doc_path.starts_with(&format!("{scope}/"))
-                }
+                Some(scope) => doc_path == scope || doc_path.starts_with(&format!("{scope}/")),
             })
             .collect();
         if docs.is_empty() {
@@ -859,9 +887,8 @@ impl Workspace {
         }
         let mut contents: BTreeMap<String, String> = BTreeMap::new();
         while let Some(joined) = set.join_next().await {
-            let (doc_path, read) = joined.map_err(|e| {
-                OverleafError::Protocol(format!("search task failed: {e}"))
-            })?;
+            let (doc_path, read) =
+                joined.map_err(|e| OverleafError::Protocol(format!("search task failed: {e}")))?;
             contents.insert(doc_path, read?.0);
         }
         let mut hits = 0usize;
@@ -1050,7 +1077,7 @@ impl Workspace {
         ))
     }
 
-    fn format_ts(ms: Option<i64>) -> String {
+    pub(crate) fn format_ts(ms: Option<i64>) -> String {
         ms.and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
             .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
             .unwrap_or_else(|| "unknown time".to_string())
@@ -1065,10 +1092,7 @@ impl Workspace {
                 tracing::debug!("history flush failed: {err}");
             }
         }
-        let updates = self
-            .client
-            .history_updates(&project.id, before, 25)
-            .await?;
+        let updates = self.client.history_updates(&project.id, before, 25).await?;
         let labels = self.client.history_labels(&project.id).await?;
         let mut out = format!(
             "History of {} ({} update batch(es), newest first):\n",
@@ -1089,7 +1113,10 @@ impl Workspace {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "unknown".to_string());
             let when = Self::format_ts(u.meta.as_ref().and_then(|m| m.end_ts));
-            out.push_str(&format!("v{} -> v{}  {when}  by {users}\n", u.from_v, u.to_v));
+            out.push_str(&format!(
+                "v{} -> v{}  {when}  by {users}\n",
+                u.from_v, u.to_v
+            ));
             if !u.pathnames.is_empty() {
                 out.push_str(&format!("    edited: {}\n", u.pathnames.join(", ")));
             }
@@ -1100,7 +1127,9 @@ impl Workspace {
                     Some(match *kind {
                         "rename" => format!(
                             "renamed {pathname} -> {}",
-                            body.get("newPathname").and_then(serde_json::Value::as_str).unwrap_or("?")
+                            body.get("newPathname")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("?")
                         ),
                         "remove" => format!("removed {pathname}"),
                         _ => format!("added {pathname}"),
@@ -1198,7 +1227,11 @@ impl Workspace {
                         .collect::<Vec<_>>();
                     Err(OverleafError::NotFound(format!(
                         "no history label named \"{name}\"; existing labels: {}",
-                        if known.is_empty() { "none".to_string() } else { known.join(", ") }
+                        if known.is_empty() {
+                            "none".to_string()
+                        } else {
+                            known.join(", ")
+                        }
                     )))
                 }
             },
@@ -1219,6 +1252,29 @@ impl Workspace {
         }
     }
 
+    /// Newest project history version, after flushing pending realtime edits
+    /// into history so they count. `None` when history cannot be read.
+    async fn latest_history_version(&self, project_id: &str) -> Option<i64> {
+        if let Err(err) = self.client.flush_history(project_id).await {
+            tracing::debug!("history flush failed: {err}");
+        }
+        self.client
+            .history_updates(project_id, None, 1)
+            .await
+            .ok()
+            .and_then(|u| u.updates.iter().map(|x| x.to_v).max())
+    }
+
+    /// Error for a history request naming a version that does not exist.
+    async fn unknown_history_version(&self, project_id: &str, what: String) -> OverleafError {
+        OverleafError::NotFound(match self.latest_history_version(project_id).await {
+            Some(latest) => {
+                format!("{what} does not exist; valid versions are 1-{latest} (see get_history)")
+            }
+            None => format!("{what} does not exist (see get_history)"),
+        })
+    }
+
     /// The history routes answer any bad version or path with a bare 500, so
     /// failures are diagnosed here: first whether the version exists at all,
     /// then whether the path existed at it.
@@ -1229,27 +1285,16 @@ impl Workspace {
         pathname: Option<&str>,
         original: OverleafError,
     ) -> OverleafError {
-        match self.client.history_filetree(project_id, version).await {
+        match self
+            .client
+            .history_filetree(project_id, version, version)
+            .await
+        {
             Err(_) => {
-                if let Err(err) = self.client.flush_history(project_id).await {
-                    tracing::debug!("history flush failed: {err}");
-                }
-                let latest = self
-                    .client
-                    .history_updates(project_id, None, 1)
+                self.unknown_history_version(project_id, format!("history version {version}"))
                     .await
-                    .ok()
-                    .and_then(|u| u.updates.iter().map(|x| x.to_v).max());
-                OverleafError::NotFound(match latest {
-                    Some(latest) => format!(
-                        "history version {version} does not exist; valid versions are 1-{latest} (see get_history)"
-                    ),
-                    None => format!("history version {version} does not exist (see get_history)"),
-                })
             }
-            Ok(tree)
-                if pathname.is_some_and(|p| !tree.diff.iter().any(|e| e.pathname == p)) =>
-            {
+            Ok(tree) if pathname.is_some_and(|p| !tree.diff.iter().any(|e| e.pathname == p)) => {
                 let pathname = pathname.unwrap_or_default();
                 let files = tree
                     .diff
@@ -1281,7 +1326,7 @@ impl Workspace {
         let pathname = normalized.trim_start_matches('/').to_string();
         let response = match self
             .client
-            .history_file(&project.id, &pathname, version)
+            .history_diff(&project.id, &pathname, version, version)
             .await
         {
             Ok(response) => response,
@@ -1298,10 +1343,8 @@ impl Workspace {
             ));
         };
         let total = content.split('\n').count();
-        let mut out = format!(
-            "{normalized} at {described} ({total} lines, read-only snapshot)\n"
-        );
-        out.push_str(&self.paged(&content, offset, limit));
+        let mut out = format!("{normalized} at {described} ({total} lines, read-only snapshot)\n");
+        out.push_str(&self.paged(&content, offset, limit, true));
         Ok(out)
     }
 
@@ -1312,7 +1355,11 @@ impl Workspace {
     ) -> Result<String> {
         let project = self.resolve_project(project).await?;
         let (version, label) = self.resolve_history_version(&project.id, version).await?;
-        let tree = match self.client.history_filetree(&project.id, version).await {
+        let tree = match self
+            .client
+            .history_filetree(&project.id, version, version)
+            .await
+        {
             Ok(tree) => tree,
             Err(err) => {
                 return Err(self
@@ -1328,9 +1375,149 @@ impl Workspace {
             Self::describe_history_version(version, &label)
         );
         for entry in entries {
-            let kind = if entry.editable { "doc" } else { "binary file" };
+            let kind = match entry.editable {
+                Some(true) => "doc",
+                Some(false) => "binary file",
+                None => "file",
+            };
             out.push_str(&format!("/{} ({kind})\n", entry.pathname));
         }
+        Ok(out)
+    }
+
+    /// Net changes between two history versions: of one doc as a line diff
+    /// attributed to its authors, or (without `path`) which files changed.
+    pub async fn diff_file(
+        &self,
+        project: Option<&str>,
+        path: Option<&str>,
+        from: &HistoryVersionRef,
+        to: Option<&HistoryVersionRef>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<String> {
+        let project = self.resolve_project(project).await?;
+        let (from_v, from_label) = self.resolve_history_version(&project.id, from).await?;
+        let (to_v, to_label) = match to {
+            Some(to) => self.resolve_history_version(&project.id, to).await?,
+            None => match self.latest_history_version(&project.id).await {
+                Some(latest) => (latest, None),
+                None => {
+                    return Err(OverleafError::NotFound(
+                        "the project has no readable history yet".to_string(),
+                    ));
+                }
+            },
+        };
+        if from_v >= to_v {
+            return Err(OverleafError::Invalid(format!(
+                "from_version ({from_v}) must be older than to_version ({to_v})"
+            )));
+        }
+        let range = format!(
+            "{} -> {}",
+            Self::describe_history_version(from_v, &from_label),
+            Self::describe_history_version(to_v, &to_label)
+        );
+        let tree = match self
+            .client
+            .history_filetree(&project.id, from_v, to_v)
+            .await
+        {
+            Ok(tree) => tree,
+            Err(_) => {
+                return Err(self
+                    .unknown_history_version(
+                        &project.id,
+                        format!("history version {from_v} or {to_v}"),
+                    )
+                    .await);
+            }
+        };
+        let Some(path) = path.map(str::trim).filter(|p| !p.is_empty()) else {
+            let mut changed: Vec<_> = tree.diff.iter().filter(|e| e.operation.is_some()).collect();
+            changed.sort_by(|a, b| a.final_path().cmp(b.final_path()));
+            if changed.is_empty() {
+                return Ok(format!(
+                    "No file of {} changed between {range}.",
+                    project.name
+                ));
+            }
+            let mut out = format!("Files of {} changed between {range}:\n", project.name);
+            for entry in &changed {
+                let binary = if entry.editable == Some(false) {
+                    " (binary)"
+                } else {
+                    ""
+                };
+                out.push_str(&format!(
+                    "/{}: {}{binary}\n",
+                    entry.final_path(),
+                    entry.describe_change()
+                ));
+            }
+            out.push_str(&format!(
+                "{} file(s) changed, {} unchanged. Pass `path` to see a doc's line changes.\n",
+                changed.len(),
+                tree.diff.len() - changed.len()
+            ));
+            return Ok(out);
+        };
+        let normalized = ProjectTree::normalize_path(path);
+        let pathname = normalized.trim_start_matches('/');
+        let entry = tree
+            .diff
+            .iter()
+            .find(|e| e.is_path(pathname))
+            .ok_or_else(|| {
+                let files = tree
+                    .diff
+                    .iter()
+                    .map(|e| format!("/{}", e.final_path()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                OverleafError::NotFound(format!(
+                    "{normalized} did not exist between {range}; files in that range: {files}"
+                ))
+            })?;
+        let status = entry.describe_change();
+        if entry.operation.is_none() {
+            return Ok(format!("{normalized} is unchanged between {range}."));
+        }
+        if entry.editable == Some(false) {
+            return Ok(format!(
+                "{normalized} is a binary file ({status}); line diffs are only available for docs."
+            ));
+        }
+        let response = self
+            .client
+            .history_diff(&project.id, pathname, from_v, to_v)
+            .await?;
+        let segments = match &response.diff {
+            HistoryDiffBody::Text(segments) => segments,
+            HistoryDiffBody::Binary(_) => {
+                return Ok(format!(
+                    "{normalized} is a binary file ({status}); line diffs are only available for docs."
+                ));
+            }
+        };
+        let diff = VersionDiff::from_segments(segments);
+        if diff.is_unchanged() {
+            return Ok(format!(
+                "{normalized} ({status}) has identical content at both ends of {range}."
+            ));
+        }
+        let removal_note = match entry.operation.as_deref() {
+            Some("removed") => {
+                " The file no longer exists at the end of the range; the diff shows its content up to its removal."
+            }
+            _ => "",
+        };
+        let rendered = diff.render(self.settings.diff_context_lines);
+        let mut out = format!(
+            "{normalized}: {range} ({status}).{removal_note}\nNet changes only: edits made and undone inside the range do not appear. Columns: +/- marker, line number at v{from_v}, line number at v{to_v}, text.\n"
+        );
+        out.push_str(&self.paged(rendered.trim_end_matches('\n'), offset, limit, false));
         Ok(out)
     }
 
@@ -1359,11 +1546,46 @@ impl Workspace {
         ))
     }
 
-    pub async fn compile(&self, project: Option<&str>) -> Result<String> {
+    pub async fn compile(&self, project: Option<&str>, main_file: Option<&str>) -> Result<String> {
         let project = self.resolve_project(project).await?;
+        // Alongside the override, remember the project's own main document:
+        // verification needs it to tell the two apart in the log.
+        let (main, default_main) = match main_file.map(str::trim).filter(|p| !p.is_empty()) {
+            None => (None, None),
+            Some(path) => {
+                let (_, tree) = self.project_tree(&project.id).await?;
+                let normalized = ProjectTree::normalize_path(path);
+                let default_main = tree
+                    .root_doc_id
+                    .as_deref()
+                    .and_then(|id| tree.path_of(id))
+                    .map(|p| p.trim_start_matches('/').to_string());
+                match tree.lookup(&normalized) {
+                    Some((doc_id, EntityKind::Doc)) => (
+                        Some(MainFileOverride {
+                            doc_id,
+                            path: normalized.trim_start_matches('/').to_string(),
+                        }),
+                        default_main,
+                    ),
+                    Some((_, kind)) => {
+                        return Err(OverleafError::Compile(format!(
+                            "{normalized} is a {}, not a doc that can be compiled as the main file",
+                            kind.describe()
+                        )));
+                    }
+                    None => {
+                        return Err(OverleafError::NotFound(format!(
+                            "{normalized} in project {}",
+                            project.name
+                        )));
+                    }
+                }
+            }
+        };
         let response = self
             .client
-            .compile(&project.id, &CompileRequest::full(None))
+            .compile(&project.id, &CompileRequest::full(main.clone()))
             .await?;
         // Rate-limited responses carry no output files; keep the previous
         // compile's record so its log and artifacts stay reachable.
@@ -1384,6 +1606,8 @@ impl Workspace {
             .cloned();
         let has_pdf = response.output_files.iter().any(|f| f.path == "output.pdf");
         let mut log = None;
+        let mut mismatch = None;
+        let mut logged_root = None;
         if let Some(log_file) = log_file {
             match self
                 .client
@@ -1392,17 +1616,47 @@ impl Workspace {
             {
                 Ok(log_bytes) => {
                     let log_text = String::from_utf8_lossy(&log_bytes).into_owned();
-                    LogSummary::parse(&log_text, 10).render(&mut out);
+                    let summary = LogSummary::parse(&log_text, 10);
+                    match (&main, summary.root.as_deref()) {
+                        (None, Some(root)) => out.push_str(&format!(
+                            "Main file compiled: {root} (the project's main document)\n"
+                        )),
+                        (Some(m), Some(root)) => {
+                            match m.check_log_root(root, default_main.as_deref()) {
+                                MainFileCheck::Confirmed => out.push_str(&format!(
+                                    "Main file compiled: /{} (main_file for this compile only)\n",
+                                    m.path
+                                )),
+                                MainFileCheck::Ambiguous => out.push_str(&format!(
+                                    "(could not confirm from the log whether /{} or the project's main document /{} was compiled: TeX names both {root})\n",
+                                    m.path,
+                                    default_main.as_deref().unwrap_or_default()
+                                )),
+                                MainFileCheck::Mismatch => mismatch = Some(root.to_string()),
+                            }
+                        }
+                        (_, None) => {}
+                    }
+                    summary.render(&mut out);
                     out.push_str(&format!(
                         "\nFull log: {} lines — page through it with read_log if the summary is not enough.\n",
                         log_text.split('\n').count()
                     ));
+                    logged_root = summary.root;
                     log = Some(log_text);
                 }
                 Err(err) => {
                     out.push_str(&format!("(could not fetch output.log: {err})\n"));
                 }
             }
+        }
+        if let Some(main) = &main
+            && logged_root.is_none()
+        {
+            out.push_str(&format!(
+                "(could not confirm from the log that /{} was the main file)\n",
+                main.path
+            ));
         }
         out.push_str(&format!(
             "Output files: {}\n",
@@ -1416,10 +1670,18 @@ impl Workspace {
         if has_pdf {
             out.push_str("Use download_output to save output.pdf locally.\n");
         }
+        // The record is kept even on a mismatch: it describes what the server
+        // really built, and read_log/download_output should reflect that.
         self.compiles
             .lock()
             .await
             .insert(project.id, CompileRecord { response, log });
+        if let (Some(main), Some(root)) = (&main, mismatch) {
+            return Err(OverleafError::Compile(format!(
+                "requested /{} as the main file, but TeX compiled {root}: this Overleaf instance did not honor the override. That compile's outputs are available via read_log/download_output.",
+                main.path
+            )));
+        }
         Ok(out)
     }
 
@@ -1448,9 +1710,7 @@ impl Workspace {
                     .find(|f| f.path == "output.log")
                     .cloned()
                     .ok_or_else(|| {
-                        OverleafError::NotFound(
-                            "output.log in the last compile".to_string(),
-                        )
+                        OverleafError::NotFound("output.log in the last compile".to_string())
                     })?;
                 let bytes = self
                     .client
@@ -1468,7 +1728,7 @@ impl Workspace {
             "output.log of last compile of {} (status {status}, {total} lines total)\n",
             project.name
         );
-        out.push_str(&self.paged(&log, offset, limit));
+        out.push_str(&self.paged(&log, offset, limit, true));
         Ok(out)
     }
 
@@ -1486,7 +1746,9 @@ impl Workspace {
             .get(&project.id)
             .map(|record| record.response.clone());
         let response = cached.ok_or_else(|| {
-            OverleafError::Edit("no compile result for this project yet; run compile first".to_string())
+            OverleafError::Edit(
+                "no compile result for this project yet; run compile first".to_string(),
+            )
         })?;
         let target = response
             .output_files
